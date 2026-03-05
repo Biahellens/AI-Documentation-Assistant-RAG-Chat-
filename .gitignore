@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Vector DB & logs
+backend/chroma_db/
+backend/logs/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# OS
+.DS_Store
