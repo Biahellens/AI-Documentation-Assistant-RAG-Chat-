@@ -1,1 +1,1 @@
-# AI-Documentation-Assistant-RAG-Chat-
+# AI-Documentation-Assistant-RAG-Chat
