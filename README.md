@@ -4,6 +4,8 @@
 
 Upload PDFs or Markdown files, ask questions, and get answers grounded in your own documents — with full conversation memory, token logging, and source attribution.
 
+![RAGCHAT](https://github.com/Biahellens/AI-Documentation-Assistant-RAG-Chat-/blob/main/imgs/Captura%20de%20Tela%202026-03-05%20%C3%A0s%2021.01.19.png)
+
 ---
 
 ## Architecture Overview
