@@ -1,60 +1,59 @@
+import json
 import os
 from typing import Optional
 from app.core.embeddings import embed_query
 from app.core.vector_store import query_similar
 from app.core.config import settings
 
-# In-memory session store — swap for Redis in production
 _sessions: dict[str, list] = {}
 
 
 class RAGService:
-    async def answer(self, question: str, history: list, doc_filter: Optional[str] = None) -> dict:
-        """
-        RAG pipeline:
-        1. Embed the query
-        2. Retrieve top-K similar chunks from vector store
-        3. Apply memory window to conversation history
-        4. Build prompt with context + history
-        5. Generate answer via LLM
-        """
-        # 1. Embed query
-        query_embedding = embed_query(question)
 
-        # 2. Retrieve relevant context
+    async def answer_stream(self, question: str, history: list, doc_filter=None):
+        query_embedding = embed_query(question)
         where = {"doc_id": doc_filter} if doc_filter else None
+
         try:
             results = query_similar(query_embedding, n_results=settings.TOP_K_RESULTS, where=where)
             context_chunks = results["documents"][0] if results["documents"] else []
             sources = results["metadatas"][0] if results["metadatas"] else []
         except Exception:
-            context_chunks = []
-            sources = []
+            context_chunks, sources = [], []
 
         if not context_chunks:
-            return {
-                "answer": "Nenhum documento indexado ainda. Faça upload de um PDF ou Markdown primeiro.",
-                "sources": [],
-                "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                "context_used": 0
-            }
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Nenhum documento indexado.'})}\n\n"
+            return
 
-        # 3. Apply memory window (last N turns)
         windowed_history = history[-(settings.MEMORY_WINDOW * 2):]
-
-        # 4. Build prompt
         context = "\n\n---\n\n".join(context_chunks)
         prompt = self._build_prompt(question, context, windowed_history)
 
-        # 5. Generate
-        answer, token_usage = await self._generate(prompt)
+        api_key = settings.OPENAI_API_KEY
+        if not api_key:
+            yield f"data: {json.dumps({'type': 'error', 'content': 'OPENAI_API_KEY não configurada.'})}\n\n"
+            return
 
-        return {
-            "answer": answer,
-            "sources": sources,
-            "token_usage": token_usage,
-            "context_used": len(context_chunks)
-        }
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key)
+
+        yield f"data: {json.dumps({'type': 'sources', 'content': sources})}\n\n"
+
+        completion_tokens = 0
+        stream = await client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            stream=True,
+        )
+
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                completion_tokens += 1
+                yield f"data: {json.dumps({'type': 'token', 'content': delta})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'token_usage': {'prompt_tokens': 0, 'completion_tokens': completion_tokens, 'total_tokens': completion_tokens}})}\n\n"
 
     def _build_prompt(self, question: str, context: str, history: list) -> str:
         history_str = "\n".join(
@@ -81,12 +80,11 @@ class RAGService:
 ANSWER:"""
 
     async def _generate(self, prompt: str) -> tuple[str, dict]:
-        from app.core.config import settings
         api_key = settings.OPENAI_API_KEY
         if api_key:
             return await self._openai_generate(prompt, api_key)
         return (
-            "⚠️ No LLM configured. Set OPENAI_API_KEY in .env to enable answers.",
+            "⚠️ No LLM configured. Set OPENAI_API_KEY in .env.",
             {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         )
 
@@ -96,7 +94,7 @@ ANSWER:"""
         response = await client.chat.completions.create(
             model=settings.LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,   # low temp = more factual, less creative
+            temperature=0.2,
         )
         usage = response.usage
         return response.choices[0].message.content, {

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { sendMessage, uploadDocument, listDocuments, deleteDocument } from "../lib/api";
+import { sendMessageStream, uploadDocument, listDocuments, deleteDocument } from "../lib/api";
 import type { Message, Document } from "../lib/api";
 
 export default function Home() {
@@ -29,12 +29,34 @@ export default function Home() {
     const newMessages: Message[] = [...messages, { role: "user", content: question }];
     setMessages(newMessages);
     setLoading(true);
+
+    setMessages([...newMessages, { role: "assistant", content: "" }]);
+
     try {
-      const res = await sendMessage(question, newMessages, activeDoc);
-      setMessages([...newMessages, { role: "assistant", content: res.answer }]);
-      setTokenTotal((t) => t + res.token_usage.total_tokens);
+      await sendMessageStream(
+        question,
+        newMessages,
+        (token) => {
+          // Acumula tokens na última mensagem
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: updated[updated.length - 1].content + token,
+            };
+            return updated;
+          });
+        },
+        (sources) => console.log("sources:", sources),
+        (usage) => setTokenTotal((t) => t + usage.total_tokens),
+        activeDoc
+      );
     } catch (e) {
-      setMessages([...newMessages, { role: "assistant", content: "❌ Error reaching backend." }]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: "assistant", content: "❌ Erro ao conectar." };
+        return updated;
+      });
     } finally {
       setLoading(false);
     }
@@ -196,17 +218,6 @@ export default function Home() {
               )}
             </div>
           ))}
-
-          {loading && (
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm">
-                AI
-              </div>
-              <div className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-gray-400 animate-pulse">
-                Thinking...
-              </div>
-            </div>
-          )}
 
           <div ref={bottomRef} />
         </div>

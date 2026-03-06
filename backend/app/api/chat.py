@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException
 from app.services.rag import RAGService
 from app.services.token_logger import TokenLogger
 from app.models.schemas import ChatRequest, ChatResponse
+from fastapi.responses import StreamingResponse
+from app.models.schemas import ChatRequest
+
 
 router = APIRouter()
 rag_service = RAGService()
@@ -33,3 +36,19 @@ async def clear_history(session_id: str):
     """Clear conversation history for a session."""
     await rag_service.clear_history(session_id)
     return {"message": "History cleared"}
+
+@router.post("/stream")
+async def chat_stream(request: ChatRequest):
+    """Endpoint SSE — retorna tokens em tempo real."""
+    return StreamingResponse(
+        rag_service.answer_stream(
+            question=request.question,
+            history=request.history,
+            doc_filter=request.doc_filter
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no", 
+        }
+    )
